@@ -1,0 +1,18 @@
+[package]
+name = "bieda-ambilight"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hidapi = "2.6"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.2.2"
+tray-icon = "0.26.1"
+windows = { version = "0.58", features = ["Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_StationsAndDesktops", "Win32_System_Threading", "Win32_UI_Controls_Dialogs", "Win32_UI_WindowsAndMessaging"] }
+xcap = "0.9.10"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

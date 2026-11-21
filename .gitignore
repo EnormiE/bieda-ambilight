@@ -1,0 +1,12 @@
+# Rust build artifacts
+/target/
+
+# Local runtime config (generated automatically on first run)
+config.toml
+*.toml.bak
+
+# Editors & OS
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
