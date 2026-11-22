@@ -1000,7 +1000,7 @@ fn main() {
         None,
     );
     let chk_reverse = CheckMenuItem::new("Reverse Direction (Left/Right)", true, cfg.reverse, None);
-    let chk_auto_off = CheckMenuItem::new("Turn Off When Screen Is Locked", true, cfg.auto_off, None);
+    let chk_auto_off = CheckMenuItem::new("Turn Off When Screen Is Off", true, cfg.auto_off, None);
     actions.insert(chk_rhythm_src.id().clone(), WorkerCmd::ToggleRhythmSource);
     actions.insert(chk_reverse.id().clone(), WorkerCmd::ToggleReverse);
     actions.insert(chk_auto_off.id().clone(), WorkerCmd::ToggleAutoOff);
@@ -1033,7 +1033,7 @@ fn main() {
 
     let _tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_tooltip("Budget Ambilight")
+        .with_tooltip("bieda-ambilight")
         .with_icon(create_tray_icon())
         .build()
         .unwrap();
