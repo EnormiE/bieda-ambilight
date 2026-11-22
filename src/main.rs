@@ -31,6 +31,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     RegisterClassW, TranslateMessage, MSG, WM_ENDSESSION, WM_QUERYENDSESSION, WNDCLASSW,
 };
 use xcap::Monitor;
+use windows_sys::Win32::UI::HiDpi::{
+    SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
 
 const VID: u16 = 0x1A86;
 const PID: u16 = 0xFE07;
@@ -814,6 +817,10 @@ fn create_tray_icon() -> Icon {
 }
 
 fn main() {
+    unsafe {
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+    
     if !ensure_single_instance() {
         return;
     }
