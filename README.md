@@ -60,6 +60,10 @@ leds_right = 12
 static_color = [255, 140, 0]
 ```
 
+## Known Limitations
+
+- **Windows HDR:** Screen Sync relies on standard SDR screen capture (`xcap`). When HDR is enabled in Windows Display Settings, captured colors may appear washed out or overly bright on the LED strip.
+
 ## Acknowledgments
 
 Protocol details and packet structure were pieced together with help from **OpenRGB** references and reverse engineering the **DX Light** control app.
