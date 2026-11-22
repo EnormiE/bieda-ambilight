@@ -34,6 +34,17 @@ use xcap::Monitor;
 use windows_sys::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
+use windows_sys::Win32::System::Power::{
+    RegisterPowerSettingNotification, POWERBROADCAST_SETTING,
+};
+use windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND, PBT_APMSUSPEND, PBT_POWERSETTINGCHANGE,
+    WM_POWERBROADCAST,
+};
+
+static POWER_SLEEPING: AtomicBool = AtomicBool::new(false);
 
 const VID: u16 = 0x1A86;
 const PID: u16 = 0xFE07;
@@ -120,11 +131,28 @@ unsafe extern "system" fn shutdown_wnd_proc(
             }
             0
         }
+        WM_POWERBROADCAST => {
+            match wparam as u32 {
+                PBT_APMSUSPEND => POWER_SLEEPING.store(true, Ordering::Relaxed),
+                PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND => {
+                    POWER_SLEEPING.store(false, Ordering::Relaxed);
+                }
+                PBT_POWERSETTINGCHANGE => {
+                    let pbs = lparam as *const POWERBROADCAST_SETTING;
+                    if !pbs.is_null() {
+                        // 0 = monitor OFF, 1 = ON, 2 = DIMMED
+                        let state = unsafe { (*pbs).Data[0] };
+                        POWER_SLEEPING.store(state == 0, Ordering::Relaxed);
+                    }
+                }
+                _ => {}
+            }
+            1
+        }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }
 
-/// Creates a hidden Win32 window to detect Windows shutdown and sign-out events.
 fn create_shutdown_listener() {
     let class_name: Vec<u16> = "BiedaAmbilightShutdownClass\0".encode_utf16().collect();
     unsafe {
@@ -132,7 +160,7 @@ fn create_shutdown_listener() {
         wc.lpfnWndProc = Some(shutdown_wnd_proc);
         wc.lpszClassName = class_name.as_ptr();
         RegisterClassW(&wc);
-        CreateWindowExW(
+        let hwnd = CreateWindowExW(
             0,
             class_name.as_ptr(),
             class_name.as_ptr(),
@@ -146,6 +174,10 @@ fn create_shutdown_listener() {
             ptr::null_mut(),
             ptr::null(),
         );
+        if !hwnd.is_null() {
+            // 0 = DEVICE_NOTIFY_WINDOW_HANDLE
+            RegisterPowerSettingNotification(hwnd, &GUID_CONSOLE_DISPLAY_STATE, 0);
+        }
     }
 }
 
@@ -694,7 +726,7 @@ fn worker_loop(rx: Receiver<WorkerCmd>, mut cfg: Config) {
         }
 
         if cfg.auto_off {
-            let locked = is_screen_locked();
+            let locked = is_screen_locked() || POWER_SLEEPING.load(Ordering::Relaxed);
             if locked && !sleeping {
                 sleeping = true;
                 if let Some(ref mut s) = strip {
@@ -820,7 +852,7 @@ fn main() {
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
-    
+
     if !ensure_single_instance() {
         return;
     }
