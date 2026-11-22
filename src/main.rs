@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,30 +22,28 @@ use windows::Win32::System::Com::{
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, WPARAM,
 };
+use windows_sys::Win32::System::Power::{
+    RegisterPowerSettingNotification, POWERBROADCAST_SETTING,
+};
 use windows_sys::Win32::System::StationsAndDesktops::{CloseDesktop, OpenInputDesktop};
+use windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Controls::Dialogs::{
     ChooseColorW, CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage,
-    RegisterClassW, TranslateMessage, MSG, WM_ENDSESSION, WM_QUERYENDSESSION, WNDCLASSW,
-};
-use xcap::Monitor;
 use windows_sys::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
-use windows_sys::Win32::System::Power::{
-    RegisterPowerSettingNotification, POWERBROADCAST_SETTING,
-};
-use windows_sys::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND, PBT_APMSUSPEND, PBT_POWERSETTINGCHANGE,
-    WM_POWERBROADCAST,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostQuitMessage,
+    RegisterClassW, TranslateMessage, MSG, PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND,
+    PBT_APMSUSPEND, PBT_POWERSETTINGCHANGE, WM_DISPLAYCHANGE, WM_ENDSESSION, WM_POWERBROADCAST,
+    WM_QUERYENDSESSION, WNDCLASSW,
 };
+use xcap::Monitor;
 
 static POWER_SLEEPING: AtomicBool = AtomicBool::new(false);
+static DISPLAYS_CHANGED: AtomicBool = AtomicBool::new(false);
 
 const VID: u16 = 0x1A86;
 const PID: u16 = 0xFE07;
@@ -129,6 +128,10 @@ unsafe extern "system" fn shutdown_wnd_proc(
             if wparam != 0 {
                 unsafe { PostQuitMessage(0) };
             }
+            0
+        }
+        WM_DISPLAYCHANGE => {
+            DISPLAYS_CHANGED.store(true, Ordering::Relaxed);
             0
         }
         WM_POWERBROADCAST => {
@@ -877,6 +880,38 @@ fn create_tray_icon() -> Icon {
     Icon::from_rgba(rgba, 16, 16).unwrap()
 }
 
+fn refresh_monitor_menu(
+    sub_mon: &Submenu,
+    mon_items: &mut Vec<CheckMenuItem>,
+    actions: &mut HashMap<MenuId, WorkerCmd>,
+    current_monitor: &str,
+) {
+    for old in mon_items.drain(..) {
+        actions.remove(old.id());
+        let _ = sub_mon.remove(&old);
+    }
+
+    let mon_auto = CheckMenuItem::new("Primary (Auto)", true, current_monitor.is_empty(), None);
+    actions.insert(mon_auto.id().clone(), WorkerCmd::SetMonitor(String::new()));
+    mon_items.push(mon_auto.clone());
+    let _ = sub_mon.append(&mon_auto);
+
+    if let Ok(monitors) = Monitor::all() {
+        for (idx, m) in monitors.iter().enumerate() {
+            let name = m.name().unwrap_or_else(|_| format!("Monitor {}", idx + 1));
+            let label = if m.is_primary().unwrap_or(false) {
+                format!("{} (Primary)", name)
+            } else {
+                name.clone()
+            };
+            let item = CheckMenuItem::new(&label, true, current_monitor == name, None);
+            actions.insert(item.id().clone(), WorkerCmd::SetMonitor(name));
+            mon_items.push(item.clone());
+            let _ = sub_mon.append(&item);
+        }
+    }
+}
+
 fn main() {
     unsafe {
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -890,6 +925,7 @@ fn main() {
 
     let cfg = load_config();
     let mut current_color = cfg.static_color;
+    let mut current_monitor = cfg.monitor_name.clone();
     let (tx, rx) = mpsc::channel::<WorkerCmd>();
 
     let worker_cfg = cfg.clone();
@@ -1001,25 +1037,7 @@ fn main() {
 
     // Submenu: Monitor
     let sub_mon = Submenu::new("Monitor", true);
-    let mon_auto = CheckMenuItem::new("Primary (Auto)", true, cfg.monitor_name.is_empty(), None);
-    actions.insert(mon_auto.id().clone(), WorkerCmd::SetMonitor(String::new()));
-    mon_items.push(mon_auto.clone());
-    let _ = sub_mon.append(&mon_auto);
-
-    if let Ok(monitors) = Monitor::all() {
-        for (idx, m) in monitors.iter().enumerate() {
-            let name = m.name().unwrap_or_else(|_| format!("Monitor {}", idx + 1));
-            let label = if m.is_primary().unwrap_or(false) {
-                format!("{} (Primary)", name)
-            } else {
-                name.clone()
-            };
-            let item = CheckMenuItem::new(&label, true, cfg.monitor_name == name, None);
-            actions.insert(item.id().clone(), WorkerCmd::SetMonitor(name));
-            mon_items.push(item.clone());
-            let _ = sub_mon.append(&item);
-        }
-    }
+    refresh_monitor_menu(&sub_mon, &mut mon_items, &mut actions, &current_monitor);
 
     // Settings checkboxes
     let chk_rhythm_src = CheckMenuItem::new(
@@ -1075,6 +1093,10 @@ fn main() {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
 
+            if DISPLAYS_CHANGED.swap(false, Ordering::Relaxed) {
+                refresh_monitor_menu(&sub_mon, &mut mon_items, &mut actions, &current_monitor);
+            }
+
             let mut should_quit = false;
             while let Ok(event) = menu_rx.try_recv() {
                 if event.id == id_pick_color {
@@ -1115,7 +1137,8 @@ fn main() {
                                 item.set_checked(item.id() == &event.id);
                             }
                         }
-                        WorkerCmd::SetMonitor(_) => {
+                        WorkerCmd::SetMonitor(name) => {
+                            current_monitor = name.clone();
                             for item in &mon_items {
                                 item.set_checked(item.id() == &event.id);
                             }
