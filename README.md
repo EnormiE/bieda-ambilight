@@ -42,7 +42,7 @@ The compiled executable will be located at `target\release\bieda-ambilight.exe`.
 
 ## Configuration
 
-On first launch, `config.toml` is created next to the executable. You can edit LED counts and default values there at any time:
+On first launch, `config.toml` is created next to the executable. You can edit LED counts and default values there (program can't be running):
 
 ```toml
 mode = "sync_game"
@@ -59,6 +59,17 @@ leds_top = 33
 leds_right = 12
 static_color = [255, 140, 0]
 ```
+
+### Adjusting LED Counts (Monitor Size)
+
+The default values (`12 / 33 / 12`) are set for a **24"** 3-sided strip. If colors look shifted or part of the strip stays off, edit `leds_left`, `leds_top`, and `leds_right` in `config.toml` (located next to `bieda-ambilight.exe`, or in `%APPDATA%\bieda-ambilight\config.toml` if run from a read-only folder) and restart the app:
+
+| Monitor Size (3-sided strip) | `leds_left` | `leds_top` | `leds_right` |
+| --- | :---: | :---: | :---: |
+| **24"** *(default)* | `12` | `33` | `12` |
+| **27"** | `18` | `30` | `18` |
+
+For other sizes or strip variants, count the LEDs along each edge and update the values accordingly.
 
 ## Known Limitations
 
