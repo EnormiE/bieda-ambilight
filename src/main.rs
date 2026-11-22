@@ -181,27 +181,56 @@ fn create_shutdown_listener() {
     }
 }
 
-fn config_path() -> PathBuf {
+fn portable_config_path() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("config.toml")))
         .unwrap_or_else(|| Path::new("config.toml").to_path_buf())
 }
 
+fn appdata_config_path() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(|dir| {
+        PathBuf::from(dir)
+            .join("bieda-ambilight")
+            .join("config.toml")
+    })
+}
+
 fn load_config() -> Config {
-    if let Ok(content) = fs::read_to_string(config_path()) {
+    let portable = portable_config_path();
+    if let Ok(content) = fs::read_to_string(&portable) {
         if let Ok(cfg) = toml::from_str(&content) {
             return cfg;
         }
     }
+
+    if let Some(appdata) = appdata_config_path() {
+        if let Ok(content) = fs::read_to_string(&appdata) {
+            if let Ok(cfg) = toml::from_str(&content) {
+                return cfg;
+            }
+        }
+    }
+
     let cfg = Config::default();
     save_config(&cfg);
     cfg
 }
 
 fn save_config(cfg: &Config) {
-    if let Ok(text) = toml::to_string_pretty(cfg) {
-        let _ = fs::write(config_path(), text);
+    let Ok(text) = toml::to_string_pretty(cfg) else {
+        return;
+    };
+
+    if fs::write(portable_config_path(), &text).is_ok() {
+        return;
+    }
+
+    if let Some(appdata) = appdata_config_path() {
+        if let Some(parent) = appdata.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(appdata, text);
     }
 }
 
